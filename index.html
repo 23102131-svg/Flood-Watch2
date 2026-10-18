@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flood Watch</title>
+<style>
+html,body{margin:0;height:100%;background:#08090e}
+body{display:flex;align-items:center;justify-content:center}
+canvas{max-width:100vw;max-height:100vh;aspect-ratio:1000/640;touch-action:none;outline:none}
+</style></head><body>
+<canvas id="c" width="1000" height="640" tabindex="0"></canvas>
+<script>
+const W=1000,H=640,cv=document.getElementById('c'),g=cv.getContext('2d');
+const NIGHT=240,HOUR=40,LEAK_FIX=2.5,REBOOT=4,HP_MAX=20,HP_TICK=20,WALL_COST=12,WALL_TIME=15,OVERFLOW=25;
+const FAI=[2,4,6,8,10,12],BAI=[1,1,2,2,3,3];
+const NAMES=["BBALL COURT","R1","R2","MAIN ROAD","EAST ROAD","SARI-SARI","CARENDERIA"];
+const Z=[[60,300,300,170],[70,120,170,110],[260,120,100,110],[410,90,60,380],[470,330,330,45],[500,110,100,70],[620,110,160,70]];
+const OFFICE=[800,320,130,65],BAR=[350,592,300,36],DOOR=[820,120,170,400],PAD=[20,220,140,180],
+PANEL=[190,200,330,240],RBTN=[220,370,270,50],WBTN=[770,520,200,52];
+const inR=(r,x,y)=>x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3];
+const rnd=n=>1+Math.floor(Math.random()*n);
+let s,st='menu',anim=0,toast='',toastT=0,caps=true,over='',last=performance.now();
+
+// ---------- sound ----------
+let ac,leakSrc;
+function A(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}
+  if(ac&&ac.state==='suspended')ac.resume();return ac}
+function beep(f,ms){const a=A();if(!a)return;const o=a.createOscillator(),v=a.createGain(),t=a.currentTime;
+  o.frequency.value=f;v.gain.setValueAtTime(.15,t);v.gain.exponentialRampToValueAtTime(.001,t+ms/1000);
+  o.connect(v);v.connect(a.destination);o.start();o.stop(t+ms/1000)}
+function leakSnd(){const a=A();if(!a||leakSrc)return;const n=a.sampleRate,b=a.createBuffer(1,n,n),d=b.getChannelData(0);let lp=0;
+  for(let i=0;i<n;i++){lp=lp*.82+(Math.random()*2-1)*.18;d[i]=lp*(.55+.45*Math.sin(2*Math.PI*4*i/n))*1.4}
+  leakSrc=a.createBufferSource();leakSrc.buffer=b;leakSrc.loop=true;leakSrc.connect(a.destination);leakSrc.start()}
+function stopLeak(){if(leakSrc){try{leakSrc.stop()}catch(e){}leakSrc=null}}
+
+// ---------- logic ----------
+const say=t=>{toast=t;toastT=3};
+function start(){st='play';
+  s={t:0,pw:100,hp:HP_MAX,hpT:0,cam:false,door:false,pad:false,bo:false,rb:-1,sel:0,fn:0,fT:0,zR:0,
+     leak:false,lf:0,wat:0,zf:Z.map(()=>0),wl:Z.map(()=>0)};
+  stopLeak();say('12 AM - SURVIVE UNTIL 6 AM')}
+function blackout(r){s.bo=true;s.cam=false;s.door=false;s.rb=-1;s.pw=0;say(r);beep(90,400)}
+function leakOn(){if(s.leak)return;s.leak=true;s.lf=0;leakSnd()}
+function upd(dt){
+  s.t+=dt;if(s.t>=NIGHT){st='win';stopLeak();return}
+  const hr=Math.min(5,Math.floor(s.t/HOUR)),fai=FAI[hr],bai=BAI[hr];
+  if(!s.bo){s.pw+=.3*dt;if(s.door)s.pw-=dt;if(s.cam)s.pw-=.45*dt;s.pw=Math.min(100,s.pw);if(s.pw<=0)blackout('POWER LOST')}
+  if(!s.bo&&s.rb<0){s.hpT+=dt;if(s.hpT>=HP_TICK){s.hpT=0;s.hp-=bai;beep(180,120);if(s.hp<=0)blackout('SYSTEM ERROR')}}
+  if(s.rb>=0){s.rb+=dt;if(s.rb>=REBOOT){s.rb=-1;s.hp=HP_MAX;s.hpT=0;if(s.bo){s.bo=false;s.pw=Math.max(s.pw,30)}say('SYSTEM ONLINE');beep(660,150)}}
+  s.fT+=dt;if(s.fT>=6){s.fT=0;if(!s.leak&&s.fn<4&&rnd(20)<=fai&&s.wl[s.fn+1]<=0){s.fn++;if(s.fn===4)leakOn()}}
+  s.zR+=dt;if(s.zR>=10){s.zR=0;const act=s.zf.filter(x=>x>0).length;
+    if(act<2&&rnd(20)<=(fai>>1)+1){const z=rnd(7)-1;if(s.zf[z]<=0&&s.wl[z]<=0)s.zf[z]=.001}}
+  for(let i=0;i<7;i++){if(s.wl[i]>0)s.wl[i]-=dt;
+    if(s.zf[i]>0){s.zf[i]+=dt;if(s.zf[i]>=OVERFLOW){s.zf[i]=0;if(!s.leak)leakOn();else s.wat=Math.min(1,s.wat+.1)}}}
+  if(s.leak){if(s.door){s.lf+=dt;if(s.lf>=LEAK_FIX){s.leak=false;s.lf=0;stopLeak();if(s.fn===4)s.fn=1}}
+    else{s.lf=0;s.wat+=.035*dt}}else s.wat=Math.max(0,s.wat-.05*dt);
+  if(s.wat>=1){over='THE OFFICE FLOODED';st='over';stopLeak()}
+}
+function togCam(){if(s.bo||s.rb>=0)return;s.cam=!s.cam;if(s.cam)s.pad=false}
+function togDoor(){if(s.bo||s.rb>=0||s.cam)return;s.door=!s.door;beep(s.door?240:320,80)}
+function togPad(){if(!s.cam)s.pad=!s.pad}
+function doReboot(){if(!s.pad||s.rb>=0)return;s.rb=0;s.cam=false;s.door=false;beep(440,100)}
+function wall(){if(!s.cam||s.bo||s.wl[s.sel]>0)return;s.pw-=WALL_COST;s.wl[s.sel]=WALL_TIME;s.zf[s.sel]=0;
+  if(s.fn===s.sel&&!s.leak){s.fn=0;s.fT=0}beep(520,120);if(s.pw<=0)blackout('POWER LOST')}
+
+// ---------- draw helpers ----------
+function poly(c,...p){g.fillStyle=c;g.beginPath();g.moveTo(p[0],p[1]);for(let i=2;i<p.length;i+=2)g.lineTo(p[i],p[i+1]);g.closePath();g.fill()}
+function line(a,b,c,d){g.beginPath();g.moveTo(a,b);g.lineTo(c,d);g.stroke()}
+function txt(t,x,y,c,f,al){g.fillStyle=c;g.font=f;g.textAlign=al||'center';g.fillText(t,x,y)}
+function bar(x,y,w,h,f,c){g.fillStyle='#1e2028';g.fillRect(x,y,w,h);g.fillStyle=c;g.fillRect(x,y,w*Math.max(0,Math.min(1,f)),h);
+  g.strokeStyle='#aab';g.lineWidth=1;g.strokeRect(x,y,w,h)}
+const SANS='sans-serif';
+
+// ---------- office ----------
+function office(){
+  poly('#12141c',0,0,W,0,700,140,300,140);poly('#6e7278',300,140,700,140,700,440,300,440);
+  poly('#5c6066',0,0,300,140,300,440,0,H);poly('#565a60',W,0,700,140,700,440,W,H);poly('#969ba2',0,H,W,H,700,440,300,440);
+  g.strokeStyle='#78787e';g.lineWidth=1;for(let i=1;i<6;i++)line(300+i*400/6,440,i*W/6,H);
+  g.fillStyle='#142246';g.fillRect(400,190,110,130);g.strokeStyle='#0a0a0e';g.strokeRect(400,190,110,130);
+  g.fillStyle='#8b623a';for(const b of [[330,350,70,55],[410,335,60,70],[480,350,65,55],[560,340,70,65]])g.fillRect(...b);
+  poly('#cdd0d4',250,400,750,400,790,430,210,430);
+  g.fillStyle='#0a0a0c';g.fillRect(210,430,580,18);g.fillRect(240,448,40,110);g.fillRect(720,448,40,110);
+  g.fillStyle='#8b623a';g.fillRect(620,328,80,74);g.fillRect(560,350,55,52);
+  txt('MoveOn',660,370,'#3a2410','bold 10px '+SANS);
+  g.strokeStyle='#3c3e46';g.lineWidth=2;g.beginPath();g.arc(450,372,26,0,7);g.stroke();g.lineWidth=3;
+  for(let i=0;i<3;i++){const a=anim*9+i*2.094;line(450,372,450+22*Math.cos(a),372+22*Math.sin(a))}
+  g.fillStyle='#3c3e46';g.fillRect(443,398,14,6);
+  // door
+  poly(s.door?'#747e8a':'#06080e',840,170,940,120,940,500,840,450);
+  g.strokeStyle='#ebbe1e';g.lineWidth=4;g.beginPath();g.moveTo(840,170);g.lineTo(940,120);g.lineTo(940,500);g.lineTo(840,450);g.closePath();g.stroke();
+  if(s.door){g.strokeStyle='#5a626c';g.lineWidth=1;for(let i=0;i<9;i++)line(842,190+i*30,938,148+i*40)}
+  else{g.fillStyle='rgba(40,60,100,.35)';g.fillRect(870,200,50,220)}
+  txt('DOOR [D]',858,530,'#e6ebf5','bold 13px '+SANS,'left');
+  if(s.leak){g.fillStyle='rgba(90,160,255,.75)';for(let i=0;i<7;i++){const ph=(anim*1.7+i*.37)%1;g.fillRect(850+i*12,440+ph*70,3,10)}}
+  if(s.wat>0){const top=H-s.wat*330;g.fillStyle='rgba(40,110,230,.47)';g.fillRect(0,top,W,H-top);
+    g.strokeStyle='rgba(150,200,255,.55)';line(0,top,W,top)}
+  g.fillStyle=s.bo?'rgba(0,0,10,.94)':'rgba(0,0,10,.37)';g.fillRect(0,0,W,H);
+  pad();
+  if(s.bo&&Math.floor(anim*2)%2===0){txt('BLACKOUT',W/2,260,'#e6463c','bold 40px '+SANS);
+    txt('Open the reboot pad on the left [R]',W/2,295,'#ddd','18px '+SANS)}
+}
+function pad(){
+  const gl=s.bo?'#e6463c':'#46dc82';
+  g.fillStyle='#24262e';g.beginPath();g.roundRect(PAD[0],PAD[1]+20,110,130,10);g.fill();
+  g.strokeStyle=gl;g.lineWidth=2;g.stroke();
+  txt('REBOOT PAD',PAD[0]+12,PAD[1]+50,gl,'bold 12px '+SANS,'left');txt('[R]',PAD[0]+12,PAD[1]+70,gl,'bold 12px '+SANS,'left');
+  if(!s.pad)return;
+  g.fillStyle='rgba(14,16,22,.96)';g.beginPath();g.roundRect(...PANEL,16);g.fill();g.strokeStyle=gl;g.stroke();
+  txt('SYSTEM REBOOT',PANEL[0]+20,PANEL[1]+36,gl,'bold 20px '+SANS,'left');
+  txt(s.bo?'STATUS: SYSTEM ERROR':'STATUS: ONLINE',PANEL[0]+20,PANEL[1]+66,'#c8cdd7','14px '+SANS,'left');
+  txt('Integrity',PANEL[0]+20,PANEL[1]+100,'#c8cdd7','14px '+SANS,'left');
+  bar(PANEL[0]+20,PANEL[1]+108,290,14,s.hp/HP_MAX,s.hp>6?'#5ac878':'#e6463c');
+  txt('Rebooting disables cameras and the door briefly.',PANEL[0]+20,PANEL[1]+150,'#c8cdd7','14px '+SANS,'left');
+  if(s.rb>=0){bar(...RBTN,s.rb/REBOOT,'#468ce6');txt('REBOOTING...',RBTN[0]+135,RBTN[1]+32,'#fff','bold 18px '+SANS)}
+  else{g.fillStyle='#328250';g.beginPath();g.roundRect(...RBTN,12);g.fill();txt('REBOOT [ENTER]',RBTN[0]+135,RBTN[1]+32,'#fff','bold 18px '+SANS)}
+}
+
+// ---------- cameras ----------
+function cams(){
+  g.fillStyle='#0a0d12';g.fillRect(0,0,W,H);
+  Z.forEach((r,i)=>{
+    g.fillStyle=i===0?'#3a3830':(i===3||i===4)?'#222530':'#161920';g.fillRect(...r);
+    g.strokeStyle='#b9bec6';g.lineWidth=3;g.strokeRect(...r);
+    if(i===3){g.save();g.translate(r[0]+36,r[1]+r[2]*0+r[3]/2);g.rotate(-Math.PI/2);txt(NAMES[i].toLowerCase(),0,0,'#d7dae0','bold 14px serif');g.restore()}
+    else txt(NAMES[i].toLowerCase(),r[0]+r[2]/2,r[1]+r[3]/2+6,'#d7dae0','bold 20px serif');
+    txt('CAM '+(i+1),r[0]+5,r[1]+14,'#828ca0','bold 11px '+SANS,'left')});
+  g.strokeStyle='#e6be28';g.lineWidth=3;g.strokeRect(...OFFICE);
+  txt('OFFICE',OFFICE[0]+65,OFFICE[1]+38,'#e6be28','bold 14px '+SANS);
+  const r=Z[s.sel],fl=s.zf[s.sel]>0,sg=s.fn===s.sel;
+  if(fl||sg){g.fillStyle='rgba(40,110,230,.47)';g.fillRect(...r);g.strokeStyle='rgba(170,210,255,.67)';g.lineWidth=1;
+    for(let i=0;i<4;i++)line(r[0]+4,r[1]+12+((anim*25+i*r[3]/4)%Math.max(1,r[3]-14)),r[0]+r[2]-4,r[1]+12+((anim*25+i*r[3]/4)%Math.max(1,r[3]-14)))}
+  if(s.wl[s.sel]>0){g.fillStyle='#ff8c14';g.fillRect(r[0],r[1],r[2],6);g.fillRect(r[0],r[1]+r[3]-6,r[2],6)}
+  g.strokeStyle='#3cdce6';g.lineWidth=4;g.strokeRect(r[0]-2,r[1]-2,r[2]+4,r[3]+4);
+  txt('CAM '+(s.sel+1)+' - '+NAMES[s.sel],40,520,'#fff','bold 20px '+SANS,'left');
+  let t='CLEAR',c='#6edc8c';
+  if(s.wl[s.sel]>0){t='FLOOD WALL UP ('+Math.ceil(s.wl[s.sel])+'s)';c='#ffa028'}
+  else if(fl){t='STREET FLOODING!';c='#ff5a50'}else if(sg){t='FLOOD SURGE HERE!';c='#ff5a50'}
+  txt(t,40,548,c,'bold 16px '+SANS,'left');
+  g.fillStyle=s.wl[s.sel]<=0?'#be6414':'#3c3c42';g.beginPath();g.roundRect(...WBTN,12);g.fill();
+  txt('DEPLOY FLOOD WALL [W]',WBTN[0]+100,WBTN[1]+22,'#fff','bold 14px '+SANS);
+  txt('costs '+WALL_COST+'% power',WBTN[0]+100,WBTN[1]+40,'#fff','12px '+SANS);
+  for(let i=0;i<60;i++){g.fillStyle='rgba(255,255,255,'+(.05+Math.random()*.07)+')';g.fillRect(Math.random()*W,Math.random()*H,20+Math.random()*80,1)}
+}
+
+// ---------- screens ----------
+function hud(){
+  const h=['12 AM','1 AM','2 AM','3 AM','4 AM','5 AM'][Math.min(5,Math.floor(s.t/HOUR))];
+  txt(h,24,44,'#fff','bold 30px '+SANS,'left');
+  txt('POWER '+Math.max(0,Math.floor(s.pw))+'%',24,66,'#fff','bold 13px '+SANS,'left');
+  bar(24,72,150,12,s.pw/100,s.pw>25?'#f0c83c':'#e6463c');
+  txt('SYSTEM HP',W-174,66,'#fff','bold 13px '+SANS,'left');
+  bar(W-174,72,150,12,s.hp/HP_MAX,s.hp>6?'#5ac878':'#e6463c');
+  const off=s.bo||s.rb>=0;
+  g.fillStyle=off?'#28282e':'#3c465a';g.beginPath();g.roundRect(...BAR,14);g.fill();
+  txt(s.cam?'CLOSE CAMERAS [SPACE]':'CAMERAS [SPACE]',BAR[0]+150,BAR[1]+23,off?'#6e6e78':'#fff','bold 15px '+SANS);
+  if(caps&&s.leak&&!s.cam)txt('[ water trickling ]',W/2,570,'#c8d2e6','italic 15px '+SANS);
+  if(toastT>0){g.globalAlpha=Math.min(1,toastT);txt(toast,W/2,105,'#fff','bold 20px '+SANS);g.globalAlpha=1}
+}
+function menu(){
+  txt('FLOOD WATCH',W/2,150,'#5aaaff','bold 64px '+SANS);
+  txt('Survive the night shift, 12 AM to 6 AM.',W/2,195,'#c8cdd7','20px '+SANS);
+  ['DOOR - click the right side (or D). Listen for trickling water, then keep it closed ~3 seconds.',
+   'CAMERAS - SPACE or the bottom bar. Click a zone (or press 1-7) to look at it.',
+   'FLOOD WALL - on camera, press W or click DEPLOY. Blocks flooding but drains power.',
+   'REBOOT PAD - click the pad on the left (or R), then REBOOT (ENTER). Fixes blackouts, refills system HP.',
+   'Open door = leak keeps filling the room. No power = blackout. C toggles captions.']
+   .forEach((t,i)=>txt(t,W/2,270+i*34,'#aab2c0','16px '+SANS));
+  if(Math.floor(anim*2)%2===0)txt('Press ENTER or tap to start',W/2,540,'#fff','bold 24px '+SANS)
+}
+function end(t,sub,c){txt(t,W/2,270,c,'bold 56px '+SANS);txt(sub,W/2,320,'#d2d6e0','22px '+SANS);
+  txt('Press ENTER or tap to play again',W/2,420,'#fff','bold 22px '+SANS)}
+
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;anim+=dt;toastT-=dt;
+  if(st==='play')upd(dt);
+  g.fillStyle='#08090e';g.fillRect(0,0,W,H);
+  if(st==='menu')menu();
+  else if(st==='over')end('GAME OVER',over,'#dc4646');
+  else if(st==='win')end('6 AM - YOU SURVIVED','The sun is up and the water is going down.','#6edc8c');
+  else{if(s.cam)cams();else office();hud()}
+  requestAnimationFrame(frame)
+}
+
+// ---------- input ----------
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();if([' ','enter'].includes(k))e.preventDefault();
+  if(st!=='play'){if(k==='enter'||k===' '){A();start()}return}
+  if(k===' ')togCam();else if(k==='d')togDoor();else if(k==='r')togPad();else if(k==='enter')doReboot();
+  else if(k==='w')wall();else if(k==='c')caps=!caps;else if(s.cam&&k>='1'&&k<='7')s.sel=+k-1});
+cv.addEventListener('pointerdown',e=>{
+  const b=cv.getBoundingClientRect(),x=(e.clientX-b.left)*W/b.width,y=(e.clientY-b.top)*H/b.height;
+  if(st!=='play'){A();start();return}
+  if(inR(BAR,x,y)){togCam();return}
+  if(s.cam){Z.forEach((r,i)=>{if(inR(r,x,y))s.sel=i});if(inR(WBTN,x,y))wall();return}
+  if(s.pad&&inR(RBTN,x,y))doReboot();else if(inR(PAD,x,y))togPad();else if(inR(DOOR,x,y))togDoor()});
+cv.focus();requestAnimationFrame(frame);
+</script></body></html>
